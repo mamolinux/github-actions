@@ -1,0 +1,52 @@
+# Automatically fetch and merge upstream master branch and tags
+name: Sync and Merge Upstream
+on:
+  workflow_call:
+    inputs:
+      upstream:
+        description: 'The owner/repo path of the upstream repository (e.g., linuxmint/cinnamon)'
+        required: true
+        type: string
+      target_branch:
+        description: 'The branch in the local repository to sync to'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync_upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
+      
+      - name: Sync upstream branch and tags
+        env:
+          UPSTREAM_REPO: ${{ inputs.upstream }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          
+          # Add and fetch the upstream remote
+          git remote add upstream https://github.com/"$UPSTREAM_REPO".git
+          git fetch upstream
+          
+          # Check if the target branch has any unique commits compared to upstream
+          if [ "$(git rev-list --count HEAD ^upstream/"$TARGET_BRANCH")" -gt 0 ]; then
+          echo "::warning::Local branch has unique commits. Overwriting with upstream."
+          # Reset the local branch to the upstream branch, discarding local changes
+          git reset --hard upstream/"$TARGET_BRANCH"
+          # Push the changes to the origin repository, overwriting the branch
+          git push origin "$TARGET_BRANCH" --force
+          # Push the tags from upstream
+          git push origin --tags --force
+          else
+          echo "Local branch is already in sync with upstream. No action needed."
+          fi
