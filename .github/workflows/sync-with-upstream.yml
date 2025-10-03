@@ -39,14 +39,19 @@ jobs:
           git fetch upstream
           
           # Check if the target branch has any unique commits compared to upstream
-          if [ "$(git rev-list --count HEAD ^upstream/"$TARGET_BRANCH")" -gt 0 ]; then
-          echo "::warning::Local branch has unique commits. Overwriting with upstream."
-          # Reset the local branch to the upstream branch, discarding local changes
-          git reset --hard upstream/"$TARGET_BRANCH"
-          # Push the changes to the origin repository, overwriting the branch
-          git push origin "$TARGET_BRANCH" --force
+          if [ "$(git rev-list --count upstream/"$TARGET_BRANCH"..HEAD)" -gt 0 ]; then
+            echo "::warning::Local branch has unique commits. Overwriting with upstream."
+            # Reset the local branch to the upstream branch, discarding local changes
+            git reset --hard upstream/"$TARGET_BRANCH"
+            # Push the changes to the origin repository, overwriting the branch
+            git push origin "$TARGET_BRANCH" --force
+          elif [ "$(git rev-list --count HEAD..upstream/"$TARGET_BRANCH")" -gt 0 ]; then
+            # Reset the local branch to the upstream branch, discarding local changes
+            git reset --hard upstream/"$TARGET_BRANCH"
+            # Push the changes to the origin repository, overwriting the branch
+            git push origin "$TARGET_BRANCH" --force
+          else
+            echo "Local branch is already in sync with upstream. No action needed."
+          fi
           # Push the tags from upstream
           git push origin --tags --force
-          else
-          echo "Local branch is already in sync with upstream. No action needed."
-          fi
