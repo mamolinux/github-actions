@@ -12,15 +12,12 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
-  actions: write
-
 jobs:
   sync_upstream:
     runs-on: ubuntu-latest
+    permissions: write-all
     steps:
-      - name: Checkout target repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target_branch }}

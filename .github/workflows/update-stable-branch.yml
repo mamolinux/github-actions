@@ -8,13 +8,10 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
-  actions: write
-
 jobs:
   update_stable_branch:
     runs-on: ubuntu-latest
+    permissions: write-all
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
