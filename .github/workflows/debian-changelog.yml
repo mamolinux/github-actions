@@ -1,0 +1,125 @@
+name: Generate Debian Changelog and Branches
+
+on:
+  push:
+    tags:
+      # Match any of the specified tag formats
+      - '[vV]?[eE]?[rR]?[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      main_branch:
+        description: 'Upstream development branch'
+        required: true
+        default: 'main'
+      package_name:
+        description: 'Debian package name'
+        required: true
+        default: 'your-package-name'
+
+permissions:
+  contents: write
+
+jobs:
+  debian_changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gbp and necessary tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-buildpackage devscripts
+
+      - name: Generate Changelog Entries
+        id: generate_changelog
+        env:
+          MAIN_BRANCH: ${{ github.event.inputs.main_branch || 'main' }}
+          PACKAGE: ${{ github.event.inputs.package_name || 'your-package-name' }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # Use GITHUB_REF_NAME for tag pushes, get latest for manual
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+              TAGS="${{ github.ref_name }}"
+          else
+              # Use a regex to find the latest versioned tag regardless of prefix
+              TAGS=$(git tag --sort=-v:refname | grep -E -m1 '^[vV]?[eE]?[rR]?[0-9]+\.[0-9]+\.[0-9]+$')
+          fi
+
+          if [ -z "$TAGS" ]; then
+              echo "No tags to process. Exiting."
+              exit 0
+          fi
+
+          # Get the last processed tag for comparison
+          PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          CHANGELOG_TMP=$(mktemp)
+
+          for TAG in $TAGS; do
+              echo "Processing version for tag: $TAG"
+              
+              # Extract just the semantic version number from the tag
+              VERSION_NUMBER=$(echo "$TAG" | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+$')
+              if [ -z "$VERSION_NUMBER" ]; then
+                  echo "Could not extract version number from tag: $TAG. Skipping."
+                  continue
+              fi
+              
+              # Create temporary branch from the tag
+              TEMP_BRANCH="temp-changelog/$VERSION_NUMBER"
+              git checkout -b "$TEMP_BRANCH" "$TAG"
+
+              # Generate the changelog entry using the extracted version number
+              gbp dch --verbose --since="$PREVIOUS_TAG" --full --ignore-regex='^Merge branch' --spawn-editor=never --debian-branch="$TEMP_BRANCH" --distribution="stable" --new-version="$VERSION_NUMBER-1"
+
+              # Append the newly created changelog entry to the temporary file
+              if [ -f debian/changelog ]; then
+                  cat debian/changelog >> "$CHANGELOG_TMP"
+              fi
+              
+              # Clean up temporary branch
+              git checkout "$MAIN_BRANCH"
+              git branch -D "$TEMP_BRANCH"
+              
+              PREVIOUS_TAG="$TAG"
+          done
+
+          # Create or check out the mamolinux/master branch
+          git checkout -B mamolinux/master
+          
+          # Add the combined changelog
+          if [ -f debian/changelog ]; then
+            # If a changelog already exists, prepend the new entries
+            cat "$CHANGELOG_TMP" debian/changelog > debian/changelog.new
+            mv debian/changelog.new debian/changelog
+          else
+            # Otherwise, just create the changelog
+            cp "$CHANGELOG_TMP" debian/changelog
+          fi
+          
+          git add debian/changelog
+          git commit -m "d/changelog: Update for version $VERSION_NUMBER"
+          
+          echo "Pushing changes to mamolinux/master..."
+          git push origin mamolinux/master
+          
+          # Clean up temp file
+          rm "$CHANGELOG_TMP"
+
+      - name: Create or update mamolinux/stable branch
+        env:
+          MAIN_BRANCH: ${{ github.event.inputs.main_branch || 'main' }}
+        run: |
+          git checkout "$MAIN_BRANCH"
+          TAG=$(git tag --sort=-v:refname | grep -E -m1 '^[vV]?[eE]?[rR]?[0-9]+\.[0-9]+\.[0-9]+$')
+          if [ -z "$TAG" ]; then
+              echo "No tags found to create stable branch from. Exiting."
+              exit 0
+          fi
+          git checkout -B mamolinux/stable "$TAG"
+          echo "Pushing mamolinux/stable based on tag $TAG..."
+          git push origin mamolinux/stable --force
